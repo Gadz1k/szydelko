@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kreator wzorów szydełkowych</title>
+  <style>
+    :root{
+      --bg:#f6f7fb;
+      --panel:#f8fafc;
+      --ink:#111827;
+      --muted:#6b7280;
+      --border:#e5e7eb;
+      --btn:#ffffff;
+      --btn-hover:#eef2ff;
+      --accent:#2563eb;
+      --danger:#ef4444;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;background:var(--bg);color:var(--ink)}
+    header{padding:12px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)}
+    .wrap{display:grid;grid-template-columns:280px 1fr;min-height:calc(100dvh - 0px)}
+    aside{background:var(--panel);border-right:1px solid var(--border);padding:12px;overflow:auto}
+    main{padding:12px;overflow:auto}
+    h3{margin:8px 0;font-size:14px;color:var(--muted)}
+
+    .symbols{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+    button.sym{background:var(--btn);border:1px solid var(--border);border-radius:10px;cursor:pointer;padding:8px;display:flex;flex-direction:column;align-items:center;gap:6px;color:var(--ink)}
+    button.sym img{height:28px;width:auto}
+    button.sym:hover{background:var(--btn-hover);border-color:#c7d2fe}
+    button.sym.active{outline:2px solid var(--accent)}
+
+    .controls{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;align-items:center;}
+    .controls input,.controls select,.controls button{background:var(--btn);color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:8px 10px; cursor:pointer;}
+    .controls button:hover{background:var(--btn-hover)}
+    .controls label.checkbox-label{display:flex;align-items:center;gap:4px;padding:8px 10px;border-radius:10px;border:1px solid var(--border);background:var(--btn)}
+
+    .canvas{background:#ffffff;border:1px solid var(--border);border-radius:12px;min-height:520px;padding:16px;display:flex;flex-direction:column-reverse; gap: 8px;}
+    .row{display:flex;gap:10px;justify-content:center;padding:4px;align-items:flex-start; cursor: default;}
+    .row.active { background-color: var(--btn-hover); border-radius: 6px; }
+    .row[data-align="left"]{justify-content:flex-start}
+    .row[data-align="right"]{justify-content:flex-end}
+
+    /* Pojedyncza instancja symbolu na kanwie */
+    .sym-instance{display:inline-flex;align-items:flex-start;justify-content:center;padding:2px;border-radius:6px;cursor:pointer;position:relative}
+    .sym-instance img{width:auto;max-height:unset}
+    .sym-instance.selected{outline:2px solid var(--accent); background:#edf2ff}
+    .sym-instance:hover:not(.selected){outline:1px dashed #c7d2fe}
+
+    .export-root{background:#ffffff;color:#000;padding:24px;display:flex;flex-direction:column-reverse; gap: 8px;}
+    .export-row{display:flex;align-items:flex-start;justify-content:center;gap:10px;padding:4px 0}
+    .export-row[data-align="left"]{justify-content:flex-start}
+    .export-row[data-align="right"]{justify-content:flex-end}
+
+    .row-number { font-weight: 500; width: 24px; text-align: center; align-self: center; flex-shrink: 0; }
+    .hint{font-size:12px;color:var(--muted)}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <aside>
+      <h3>Symbole</h3>
+      <div id="sym-toolbar" class="symbols"></div>
+      <input id="dir-picker" type="file" webkitdirectory directory multiple accept="image/svg+xml" style="display:none" />
+      <button id="btn-load-dir">📦 Załaduj folder z symbolami</button>
+
+      <h3>Modyfikacja symbolu</h3>
+      <div class="controls">
+        <label>Obrót (°)
+          <input id="sym-rotation" type="range" min="-180" max="180" value="0" step="5">
+        </label>
+        <input id="rotation-value" type="number" value="0" style="width: 70px;">
+        <button id="btn-rot-minus">↺ −15°</button>
+        <button id="btn-rot-plus">↻ +15°</button>
+        <button id="btn-flip">↔ Lustrzanie</button>
+        <button id="btn-reset-rotation" title="Resetuj obrót">🔄 Reset</button>
+      </div>
+      <div class="hint">Wybierz symbol na kanwie, aby go obracać/odwracać. Bez zaznaczenia – ustawienia dotyczą nowo dodawanych symboli.</div>
+
+      <div class="controls">
+        <button id="btn-add">➕ Dodaj symbol</button>
+        <button id="btn-undo">↩️ Cofnij</button>
+        <button id="btn-delete">🗑️ Usuń zaznaczony</button>
+        <button id="btn-newrow">⏎ Nowy rząd</button>
+      </div>
+
+      <h3>Ustawienia</h3>
+      <div class="controls">
+        <label>Rozmiar
+          <input id="size" type="number" min="16" max="64" value="28" style="width:72px">
+        </label>
+        <label>Odstęp
+          <input id="gap" type="number" min="6" max="48" value="10" style="width:72px">
+        </label>
+        <label>Wyrównanie
+          <select id="align">
+            <option value="center">Środek</option>
+            <option value="left">Lewo</option>
+            <option value="right">Prawo</option>
+          </select>
+        </label>
+        <label>Limit szer. (×H)
+          <input id="ratio" type="number" step="0.1" min="1" max="4" value="1.4" style="width:80px">
+        </label>
+      </div>
+
+      <h3>Numeracja rzędów</h3>
+      <div class="controls">
+        <label class="checkbox-label">
+          <input type="checkbox" id="num-enabled"> Włączona
+        </label>
+        <label>Pozycja
+          <select id="num-placement">
+            <option value="both">Obie strony</option>
+            <option value="left">Lewa strona</option>
+            <option value="right">Prawa strona</option>
+          </select>
+        </label>
+        <label>Rozmiar
+          <input id="num-size" type="number" min="8" max="32" style="width:60px">
+        </label>
+        <label>Kolor
+          <input id="num-color" type="color">
+        </label>
+      </div>
+
+      <h3>Zapis / Odczyt</h3>
+      <div class="controls">
+        <button id="btn-save-file">💾 Zapisz do pliku</button>
+        <button id="btn-load-file">📂 Wczytaj z pliku</button>
+      </div>
+      <input type="file" id="file-loader" accept=".json" style="display:none" />
+
+      <h3>Eksport</h3>
+      <div class="controls">
+        <label>Orientacja
+          <select id="pdf-orient">
+            <option value="p">Pionowo (A4)</option>
+            <option value="l">Poziomo (A4)</option>
+          </select>
+        </label>
+        <button id="btn-export">📑 Eksport do PDF</button>
+      </div>
+    </aside>
+    <main>
+      <div id="canvas" class="canvas"></div>
+    </main>
+  </div>
+
+  <script>
+    const toolbar = document.getElementById('sym-toolbar');
+    const dirPicker = document.getElementById('dir-picker');
+    const btnLoadDir = document.getElementById('btn-load-dir');
+    const fileLoader = document.getElementById('file-loader');
+
+    const model = {
+      rows:[[]],                     // każde pole to: { sym, rotation, flipX }
+      currentSym:null,
+      selectedRow:0,
+      size:28,
+      gap:10,
+      align:'center',
+      maxRatio:1.4,
+      currentRotation: 0,
+      currentFlipX: false,
+      selected: null,                // {rowIndex, symIndex}
+      numbering: {
+        enabled: true,
+        placement: 'both',
+        size: 16,
+        color: '#6b7280'
+      }
+    };
+    const symbolRegistry = new Map();
+
+    btnLoadDir.onclick = ()=> dirPicker.click();
+    dirPicker.onchange = (e)=>{
+      toolbar.innerHTML = '';
+      symbolRegistry.clear();
+      for(const f of e.target.files){
+        if(!f.name.endsWith('.svg')) continue;
+        const key = f.name.replace(/\.svg$/i,'');
+        const reader = new FileReader();
+        reader.onload = ()=>{
+          symbolRegistry.set(key, reader.result);
+          rebuildToolbar();
+        };
+        reader.readAsDataURL(f);
+      }
+    };
+
+    function rebuildToolbar(){
+      toolbar.innerHTML = '';
+      const sortedKeys = Array.from(symbolRegistry.keys()).sort();
+      for(const key of sortedKeys){
+        const dataURL = symbolRegistry.get(key);
+        const btn = document.createElement('button');
+        btn.className='sym';
+        const img = document.createElement('img');
+        img.src = dataURL;
+        btn.appendChild(img);
+        const lab=document.createElement('label');
+        lab.textContent=key;
+        btn.appendChild(lab);
+        btn.onclick = ()=>{ 
+          model.currentSym=key; 
+          document.querySelectorAll('button.sym').forEach(b=>b.classList.remove('active')); 
+          btn.classList.add('active'); 
+        };
+        toolbar.appendChild(btn);
+      }
+    }
+
+    const canvas = document.getElementById('canvas');
+    const sizeInput = document.getElementById('size');
+    const gapInput = document.getElementById('gap');
+    const alignSelect = document.getElementById('align');
+    const ratioInput = document.getElementById('ratio');
+    const orientSelect = document.getElementById('pdf-orient');
+    const numEnabled = document.getElementById('num-enabled');
+    const numPlacement = document.getElementById('num-placement');
+    const numSize = document.getElementById('num-size');
+    const numColor = document.getElementById('num-color');
+
+    const symRotation = document.getElementById('sym-rotation');
+    const rotationValue = document.getElementById('rotation-value');
+    const btnResetRotation = document.getElementById('btn-reset-rotation');
+    const btnRotMinus = document.getElementById('btn-rot-minus');
+    const btnRotPlus  = document.getElementById('btn-rot-plus');
+    const btnFlip     = document.getElementById('btn-flip');
+
+    function createNumberSpan(rowIndex) {
+      const numSpan = document.createElement('span');
+      numSpan.className = 'row-number';
+      numSpan.textContent = rowIndex;
+      numSpan.style.fontSize = model.numbering.size + 'px';
+      numSpan.style.color = model.numbering.color;
+      return numSpan;
+    }
+
+    function getSelected(){
+      if(!model.selected) return null;
+      const {rowIndex, symIndex} = model.selected;
+      const row = model.rows[rowIndex];
+      if(!row || !row[symIndex]) return null;
+      return {rowIndex, symIndex, item: row[symIndex]};
+    }
+
+    function clearSelection(){
+      model.selected = null;
+      render();
+      syncControlsToSelection();
+    }
+
+    function syncControlsToSelection(){
+      const sel = getSelected();
+      if(sel){
+        symRotation.value = sel.item.rotation;
+        rotationValue.value = sel.item.rotation;
+      }else{
+        symRotation.value = model.currentRotation;
+        rotationValue.value = model.currentRotation;
+      }
+    }
+
+    function render(){
+      canvas.innerHTML='';
+      model.rows.forEach((row, rowIndex)=>{
+        const r=document.createElement('div');
+        r.className='row';
+        r.style.gap = model.gap + 'px';
+        r.dataset.align = model.align;
+        r.style.justifyContent = model.align==='left'?'flex-start':model.align==='right'?'flex-end':'center';
+        r.style.minHeight = model.size + 'px';
+        if (rowIndex === model.selectedRow) { r.classList.add('active'); }
+        r.onclick = (e) => {
+          // klik w tło rzędu – zaznacza rząd, ale odznacza symbol
+          if(e.target === r){ model.selectedRow = rowIndex; clearSelection(); }
+        };
+
+        if (model.numbering.enabled && (model.numbering.placement === 'left' || model.numbering.placement === 'both')) {
+          r.appendChild(createNumberSpan(rowIndex));
+        }
+
+        row.forEach((symObject, symIndex)=>{
+          const wrap = document.createElement('span');
+          wrap.className = 'sym-instance';
+          // zaznaczenie?
+          if(model.selected && model.selected.rowIndex===rowIndex && model.selected.symIndex===symIndex){
+            wrap.classList.add('selected');
+          }
+          wrap.onclick = (e)=>{
+            e.stopPropagation();
+            model.selectedRow = rowIndex;
+            model.selected = {rowIndex, symIndex};
+            render();
+            syncControlsToSelection();
+          };
+
+          const img=document.createElement('img');
+          img.src=symbolRegistry.get(symObject.sym) || '';
+          img.style.width = 'auto';
+          img.style.maxWidth = (model.size * model.maxRatio) + 'px';
+          img.style.transform = `scaleX(${symObject.flipX ? -1 : 1}) rotate(${symObject.rotation}deg)`;
+          wrap.appendChild(img);
+          r.appendChild(wrap);
+        });
+
+        if (model.numbering.enabled && (model.numbering.placement === 'right' || model.numbering.placement === 'both')) {
+          r.appendChild(createNumberSpan(rowIndex));
+        }
+        canvas.appendChild(r);
+      });
+    }
+
+    document.getElementById('btn-add').onclick=()=>{
+      if(!model.currentSym) return;
+      model.rows[model.selectedRow].push({ sym: model.currentSym, rotation: model.currentRotation, flipX: model.currentFlipX });
+      render();
+      saveState();
+    };
+
+    document.getElementById('btn-undo').onclick = () => {
+      let currentRow = model.rows[model.selectedRow];
+      if (model.selected && model.selected.rowIndex===model.selectedRow){
+        // cofnięcie ostatniej edycji – tu uproszczenie: usuń zaznaczony
+        const {symIndex} = model.selected;
+        currentRow.splice(symIndex,1);
+        clearSelection();
+      } else if (currentRow && currentRow.length > 0) {
+        currentRow.pop();
+      } else if (model.rows.length > 1 && model.rows[model.selectedRow].length === 0) {
+        model.rows.splice(model.selectedRow, 1);
+        model.selectedRow = Math.max(0, model.selectedRow - 1);
+      }
+      render();
+      saveState();
+    };
+
+    document.getElementById('btn-delete').onclick = () => {
+      const sel = getSelected();
+      if(!sel) return;
+      model.rows[sel.rowIndex].splice(sel.symIndex,1);
+      clearSelection();
+      saveState();
+    };
+
+    document.getElementById('btn-newrow').onclick=()=>{
+      model.rows.push([]);
+      model.selectedRow=model.rows.length-1;
+      clearSelection();
+      render();
+      saveState();
+    };
+
+    sizeInput.onchange = ()=>{ model.size = Math.max(16, Math.min(64, Number(sizeInput.value)||28)); render(); saveState(); };
+    gapInput.onchange = ()=>{ model.gap = Math.max(6, Math.min(48, Number(gapInput.value)||10)); render(); saveState(); };
+    alignSelect.onchange = ()=>{ model.align = alignSelect.value; render(); saveState(); };
+    ratioInput.onchange = ()=>{ model.maxRatio = Math.max(1, Math.min(4, Number(ratioInput.value)||1.4)); render(); saveState(); };
+
+    numEnabled.onchange = () => { model.numbering.enabled = numEnabled.checked; render(); saveState(); };
+    numPlacement.onchange = () => { model.numbering.placement = numPlacement.value; render(); saveState(); };
+    numSize.onchange = () => { model.numbering.size = Number(numSize.value); render(); saveState(); };
+    numColor.onchange = () => { model.numbering.color = numColor.value; render(); saveState(); };
+
+    // Obracanie – jeśli jest zaznaczony symbol, modyfikuje jego rotation; w przeciwnym razie ustawia „domyślne”
+    function applyRotationToTarget(value){
+      const sel = getSelected();
+      if(sel){
+        sel.item.rotation = value;
+      }else{
+        model.currentRotation = value;
+      }
+      render();
+      saveState();
+    }
+    function nudgeRotation(delta){
+      const sel = getSelected();
+      if(sel){
+        sel.item.rotation = clampAngle(sel.item.rotation + delta);
+        symRotation.value = sel.item.rotation;
+        rotationValue.value = sel.item.rotation;
+      }else{
+        model.currentRotation = clampAngle(model.currentRotation + delta);
+        symRotation.value = model.currentRotation;
+        rotationValue.value = model.currentRotation;
+      }
+      render();
+      saveState();
+    }
+    function clampAngle(a){
+      // utrzymuj w zakresie -180..180
+      a = ((a + 180) % 360 + 360) % 360 - 180;
+      return Math.round(a);
+    }
+
+    symRotation.oninput = () => {
+      const v = Number(symRotation.value);
+      rotationValue.value = v;
+      applyRotationToTarget(v);
+    };
+    rotationValue.onchange = () => {
+      let v = Number(rotationValue.value)||0;
+      v = clampAngle(v);
+      symRotation.value = v;
+      applyRotationToTarget(v);
+    };
+    btnResetRotation.onclick = () => {
+      symRotation.value = 0;
+      rotationValue.value = 0;
+      applyRotationToTarget(0);
+    };
+    btnRotMinus.onclick = ()=> nudgeRotation(-15);
+    btnRotPlus.onclick  = ()=> nudgeRotation(15);
+
+    // Lustrzane odbicie – przełącza flipX na zaznaczonym lub domyślne dla nowych
+    btnFlip.onclick = () => {
+      const sel = getSelected();
+      if(sel){
+        sel.item.flipX = !sel.item.flipX;
+      }else{
+        model.currentFlipX = !model.currentFlipX;
+        btnFlip.classList.toggle('active', model.currentFlipX);
+      }
+      render();
+      saveState();
+    };
+
+    // Klawisze skrótów: [ / ] = ±15°, F = flip, Delete = usuń
+    window.addEventListener('keydown', (e)=>{
+      if(e.key==='['){ e.preventDefault(); nudgeRotation(-15); }
+      if(e.key===']'){ e.preventDefault(); nudgeRotation(15); }
+      if(e.key.toLowerCase()==='f'){ e.preventDefault(); btnFlip.click(); }
+      if(e.key==='Delete'){ e.preventDefault(); document.getElementById('btn-delete').click(); }
+      if(e.key==='Escape'){ clearSelection(); }
+    });
+
+    function saveState() {
+      const state = { ...model };
+      localStorage.setItem('crochetPatternAutosave', JSON.stringify(state));
+    }
+
+    function applyState(state) {
+      if (!state || !state.rows) { return; }
+
+      // kompatybilność wsteczna: stare zapisy trzymały stringi
+      if (state.rows.length > 0 && state.rows[0].length > 0 && typeof state.rows[0][0] === 'string') {
+        state.rows = state.rows.map(row =>
+          row.map(sym => ({ sym: sym, rotation: 0, flipX: false }))
+        );
+      } else {
+        // upewnij się, że każde pole ma flipX
+        state.rows = state.rows.map(row =>
+          row.map(obj => ({ sym: obj.sym, rotation: obj.rotation||0, flipX: !!obj.flipX }))
+        );
+      }
+
+      Object.assign(model, state);
+
+      model.numbering = state.numbering || { enabled: true, placement: 'both', size: 16, color: '#6b7280' };
+      model.selectedRow = state.selectedRow || (model.rows.length > 0 ? model.rows.length - 1 : 0);
+      model.currentRotation = state.currentRotation || 0;
+      model.currentFlipX = !!state.currentFlipX;
+      model.selected = null;
+
+      // Aktualizacja UI
+      sizeInput.value = model.size;
+      gapInput.value = model.gap;
+      alignSelect.value = model.align;
+      ratioInput.value = model.maxRatio;
+      symRotation.value = model.currentRotation;
+      rotationValue.value = model.currentRotation;
+
+      numEnabled.checked = model.numbering.enabled;
+      numPlacement.value = model.numbering.placement;
+      numSize.value = model.numbering.size;
+      numColor.value = model.numbering.color;
+
+      render();
+    }
+
+    function loadState() {
+      const savedStateJSON = localStorage.getItem('crochetPatternAutosave');
+      if (savedStateJSON) {
+        try {
+          const savedState = JSON.parse(savedStateJSON);
+          applyState(savedState);
+        } catch (e) {
+          console.error("Błąd parsowania zapisanego stanu:", e);
+          localStorage.removeItem('crochetPatternAutosave');
+        }
+      } else {
+        applyState(model);
+      }
+      syncControlsToSelection();
+    }
+
+    document.getElementById('btn-save-file').onclick = () => {
+      const stateJSON = JSON.stringify(model, null, 2);
+      const blob = new Blob([stateJSON], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'wzor-szydelkowy.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    };
+
+    document.getElementById('btn-load-file').onclick = () => { fileLoader.click(); };
+
+    fileLoader.onchange = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const loadedState = JSON.parse(event.target.result);
+          applyState(loadedState);
+          saveState(); 
+        } catch (err) {
+          alert('Błąd: Nie udało się wczytać pliku. Upewnij się, że jest to poprawny plik zapisu wzoru.');
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    };
+
+    document.getElementById('btn-export').onclick = exportPDF;
+
+    async function exportPDF(){
+      const { jsPDF } = window.jspdf;
+      const orient = document.getElementById('pdf-orient').value;
+      const exportRoot = document.createElement('div');
+      exportRoot.className = 'export-root';
+      model.rows.forEach((row, rowIndex)=>{
+        const er = document.createElement('div');
+        er.className='export-row';
+        er.style.gap = model.gap + 'px';
+        er.dataset.align = model.align;
+        er.style.justifyContent = model.align==='left'?'flex-start':model.align==='right'?'flex-end':'center';
+        er.style.minHeight = model.size + 'px';
+
+        if (model.numbering.enabled && (model.numbering.placement === 'left' || model.numbering.placement === 'both')) {
+          er.appendChild(createNumberSpan(rowIndex));
+        }
+
+        row.forEach(symObject=>{
+          const img=document.createElement('img');
+          img.src = symbolRegistry.get(symObject.sym) || '';
+          img.style.width = 'auto';
+          img.style.maxWidth = (model.size * model.maxRatio) + 'px';
+          img.style.transform = `scaleX(${symObject.flipX ? -1 : 1}) rotate(${symObject.rotation}deg)`;
+          er.appendChild(img);
+        });
+        
+        if (model.numbering.enabled && (model.numbering.placement === 'right' || model.numbering.placement === 'both')) {
+          er.appendChild(createNumberSpan(rowIndex));
+        }
+        exportRoot.appendChild(er);
+      });
+      document.body.appendChild(exportRoot);
+      const scale = 2.5;
+      const shot = await html2canvas(exportRoot, { backgroundColor:'#ffffff', scale });
+      const imgData = shot.toDataURL('image/png');
+      const pdf = new jsPDF({ orientation: orient, unit:'pt', format:'a4' });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const margin = 28;
+      const ratio = Math.min((pageW - margin*2)/shot.width, (pageH - margin*2)/shot.height);
+      const w = shot.width * ratio; const h = shot.height * ratio;
+      pdf.addImage(imgData, 'PNG', (pageW-w)/2, (pageH-h)/2, w, h);
+      pdf.save('wzor_chusta.pdf');
+      document.body.removeChild(exportRoot);
+    }
+
+    // start
+    loadState();
+  </script>
+</body>
+</html>
