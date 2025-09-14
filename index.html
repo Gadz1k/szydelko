@@ -19,7 +19,7 @@
     *{box-sizing:border-box}
     body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;background:var(--bg);color:var(--ink)}
     header{padding:12px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border)}
-    .wrap{display:grid;grid-template-columns:280px 1fr;min-height:calc(100dvh - 0px)}
+    .wrap{display:grid;grid-template-columns:300px 1fr;min-height:100dvh}
     aside{background:var(--panel);border-right:1px solid var(--border);padding:12px;overflow:auto}
     main{padding:12px;overflow:auto}
     h3{margin:8px 0;font-size:14px;color:var(--muted)}
@@ -33,16 +33,15 @@
     .controls{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;align-items:center;}
     .controls input,.controls select,.controls button{background:var(--btn);color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:8px 10px; cursor:pointer;}
     .controls button:hover{background:var(--btn-hover)}
-    .controls label.checkbox-label{display:flex;align-items:center;gap:4px;padding:8px 10px;border-radius:10px;border:1px solid var(--border);background:var(--btn)}
+    .controls label.checkbox-label{display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:10px;border:1px solid var(--border);background:var(--btn)}
 
-    /* Tryb liniowy (dotychczasowy) */
+    /* Tryb liniowy */
     .canvas.linear{background:#ffffff;border:1px solid var(--border);border-radius:12px;min-height:520px;padding:16px;display:flex;flex-direction:column-reverse; gap: 8px;}
     .row{display:flex;gap:10px;justify-content:center;padding:4px;align-items:flex-start; cursor: default;}
     .row.active { background-color: var(--btn-hover); border-radius: 6px; }
     .row[data-align="left"]{justify-content:flex-start}
     .row[data-align="right"]{justify-content:flex-end}
 
-    /* Pojedyncza instancja symbolu na kanwie */
     .sym-instance{display:inline-flex;align-items:flex-start;justify-content:center;padding:2px;border-radius:6px;cursor:pointer;position:relative}
     .sym-instance img{width:auto;max-height:unset}
     .sym-instance.selected{outline:2px solid var(--accent); background:#edf2ff}
@@ -52,11 +51,10 @@
     .export-row{display:flex;align-items:flex-start;justify-content:center;gap:10px;padding:4px 0}
     .export-row[data-align="left"]{justify-content:flex-start}
     .export-row[data-align="right"]{justify-content:flex-end}
-
     .row-number { font-weight: 500; width: 24px; text-align: center; align-self: center; flex-shrink: 0; }
     .hint{font-size:12px;color:var(--muted)}
 
-    /* NOWE: Tryb kwadratowy wokół magic ring */
+    /* Tryb kwadratowy (magic ring) */
     .canvas.square{background:#ffffff;border:1px solid var(--border);border-radius:12px;min-height:520px;padding:16px;display:flex;align-items:center;justify-content:center;}
     .square-stage{display:grid;gap:0}
     .cell{display:flex;align-items:center;justify-content:center;position:relative}
@@ -70,7 +68,6 @@
       background: #ffffff;
     }
 
-    /* UI pomocnicze */
     .badge{font-size:12px;padding:2px 6px;border:1px solid var(--border);border-radius:999px;background:var(--btn);color:var(--muted)}
   </style>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
@@ -151,6 +148,31 @@
         </label>
       </div>
 
+      <!-- Środek (ring) + orientacja do środka -->
+      <h3>Środek (ring)</h3>
+      <div class="controls">
+        <button id="btn-center-from-selected" title="Użyj aktualnie wybranego symbolu jako środka">🎯 Ustaw środek z wybranego symbolu</button>
+        <button id="btn-center-clear" title="Usuń własny ring i użyj kółka">✖ Usuń środek</button>
+        <label>Skala środka
+          <input id="center-scale" type="range" min="30" max="140" value="90">
+        </label>
+        <label>Obrót środka
+          <input id="center-rot" type="range" min="-180" max="180" value="0" step="5">
+        </label>
+        <button id="center-flip">↔ Lustrzanie środka</button>
+      </div>
+
+      <div class="controls">
+        <label class="checkbox-label" title="Automatycznie obraca symbole na obwodzie w stronę środka">
+          <input type="checkbox" id="orient-inward"> Orientuj symbole do środka
+        </label>
+        <label title="Korekta bazowego kierunku SVG (gdy symbole domyślnie są 'do góry' lub 'w prawo')">
+          Offset orientacji (°)
+          <input id="orient-offset" type="range" min="-180" max="180" value="-90" step="5">
+        </label>
+        <input id="orient-offset-val" type="number" value="-90" style="width:70px">
+      </div>
+
       <h3>Zapis / Odczyt</h3>
       <div class="controls">
         <button id="btn-save-file">💾 Zapisz do pliku</button>
@@ -182,24 +204,53 @@
 
     const model = {
       layout: 'linear',              // 'linear' | 'square'
-      rows:[[]],                     // w 'linear': tablica rzędów; w 'square': tablica WARSTW (perymetrów)
+      rows:[[]],                     // w 'linear': rzędy; w 'square': warstwy (perymetry)
       currentSym:null,
-      selectedRow:0,                 // rząd lub warstwa
+      selectedRow:0,
       size:28,
       gap:10,
-      align:'center',                // używane w 'linear'
+      align:'center',
       maxRatio:1.4,
       currentRotation: 0,
       currentFlipX: false,
-      selected: null,                // {rowIndex, symIndex}
-      numbering: {
-        enabled: true,
-        placement: 'both',
-        size: 16,
-        color: '#6b7280'
-      }
+      selected: null,
+      numbering: { enabled: true, placement: 'both', size: 16, color: '#6b7280' },
+      center: null,                  // { sym, scale, rotation, flipX }
+      squareOrientInward: true,
+      squareOrientOffset: -90        // korekta w stopniach
     };
     const symbolRegistry = new Map();
+
+    // UI refs
+    const canvas = document.getElementById('canvas');
+    const sizeInput = document.getElementById('size');
+    const gapInput = document.getElementById('gap');
+    const alignSelect = document.getElementById('align');
+    const ratioInput = document.getElementById('ratio');
+    const orientSelect = document.getElementById('pdf-orient');
+    const numEnabled = document.getElementById('num-enabled');
+    const numPlacement = document.getElementById('num-placement');
+    const numSize = document.getElementById('num-size');
+    const numColor = document.getElementById('num-color');
+    const layoutMode = document.getElementById('layout-mode');
+    const modeBadge = document.getElementById('mode-badge');
+
+    const symRotation = document.getElementById('sym-rotation');
+    const rotationValue = document.getElementById('rotation-value');
+    const btnResetRotation = document.getElementById('btn-reset-rotation');
+    const btnRotMinus = document.getElementById('btn-rot-minus');
+    const btnRotPlus  = document.getElementById('btn-rot-plus');
+    const btnFlip     = document.getElementById('btn-flip');
+
+    // Center + orientation controls
+    const btnCenterFromSel = document.getElementById('btn-center-from-selected');
+    const btnCenterClear   = document.getElementById('btn-center-clear');
+    const centerScale      = document.getElementById('center-scale');
+    const centerRot        = document.getElementById('center-rot');
+    const centerFlip       = document.getElementById('center-flip');
+    const orientInward     = document.getElementById('orient-inward');
+    const orientOffset     = document.getElementById('orient-offset');
+    const orientOffsetVal  = document.getElementById('orient-offset-val');
 
     btnLoadDir.onclick = ()=> dirPicker.click();
     dirPicker.onchange = (e)=>{
@@ -236,26 +287,6 @@
       }
     }
 
-    const canvas = document.getElementById('canvas');
-    const sizeInput = document.getElementById('size');
-    const gapInput = document.getElementById('gap');
-    const alignSelect = document.getElementById('align');
-    const ratioInput = document.getElementById('ratio');
-    const orientSelect = document.getElementById('pdf-orient');
-    const numEnabled = document.getElementById('num-enabled');
-    const numPlacement = document.getElementById('num-placement');
-    const numSize = document.getElementById('num-size');
-    const numColor = document.getElementById('num-color');
-    const layoutMode = document.getElementById('layout-mode');
-    const modeBadge = document.getElementById('mode-badge');
-
-    const symRotation = document.getElementById('sym-rotation');
-    const rotationValue = document.getElementById('rotation-value');
-    const btnResetRotation = document.getElementById('btn-reset-rotation');
-    const btnRotMinus = document.getElementById('btn-rot-minus');
-    const btnRotPlus  = document.getElementById('btn-rot-plus');
-    const btnFlip     = document.getElementById('btn-flip');
-
     function createNumberSpan(rowIndex) {
       const numSpan = document.createElement('span');
       numSpan.className = 'row-number';
@@ -288,6 +319,11 @@
         symRotation.value = model.currentRotation;
         rotationValue.value = model.currentRotation;
       }
+      centerScale.value = Math.round((model.center?.scale ?? 0.9) * 100);
+      centerRot.value   = model.center?.rotation ?? 0;
+      orientInward.checked = model.squareOrientInward;
+      orientOffset.value = model.squareOrientOffset;
+      orientOffsetVal.value = model.squareOrientOffset;
     }
 
     /* ---------- RENDER ---------- */
@@ -296,7 +332,6 @@
       canvas.innerHTML='';
 
       if(model.layout === 'linear'){
-        // klasyczny widok „rzędy”
         model.rows.forEach((row, rowIndex)=>{
           const r=document.createElement('div');
           r.className='row';
@@ -335,18 +370,17 @@
         modeBadge.textContent = 'Tryb: rzędy';
       } else {
         // tryb kwadratowy wokół magic ring
-        const layers = model.rows.length;            // 0..N-1 (0 też dopuszczamy, ale min 1 dla pierścienia)
-        const radius = Math.max(1, layers);          // żeby zawsze mieć środek
-        const gridSize = radius * 2 + 1;             // np. 1 warstwa => 3x3, 2 warstwy => 5x5
-        const cell = Math.max(10, model.size + model.gap); // rozmiar komórki zależny od size+gap
+        const layers = model.rows.length;            
+        const radius = Math.max(1, layers);          
+        const gridSize = radius * 2 + 1;             
+        const cell = Math.max(10, model.size + model.gap);
         const stage = document.createElement('div');
         stage.className = 'square-stage';
         stage.style.setProperty('--cell', cell + 'px');
         stage.style.gridTemplateColumns = `repeat(${gridSize}, ${cell}px)`;
         stage.style.gridTemplateRows = `repeat(${gridSize}, ${cell}px)`;
 
-        // Budujemy tabelę pustych komórek
-        const cellRefs = []; // [y][x]
+        const cellRefs = [];
         for(let y=0;y<gridSize;y++){
           const row = [];
           for(let x=0;x<gridSize;x++){
@@ -360,39 +394,44 @@
           cellRefs.push(row);
         }
 
-        // Środek – magic ring
         const cx = radius, cy = radius;
-        const ring = document.createElement('div');
-        ring.className='magic-ring';
-        cellRefs[cy][cx].appendChild(ring);
 
-        // Funkcja: współrzędne k-tego elementu na obwodzie kwadratu dla danej warstwy
+        // ŚRODEK
+        if (model.center?.sym && symbolRegistry.has(model.center.sym)) {
+          const wrap = document.createElement('span');
+          wrap.className = 'sym-instance';
+          const img = document.createElement('img');
+          img.src = symbolRegistry.get(model.center.sym);
+          const scale = (model.center.scale ?? 0.9);
+          img.style.maxWidth  = Math.floor(cell * scale) + 'px';
+          img.style.maxHeight = Math.floor(cell * scale) + 'px';
+          img.style.transform = `scaleX(${model.center.flipX ? -1 : 1}) rotate(${model.center.rotation||0}deg)`;
+          wrap.appendChild(img);
+          cellRefs[cy][cx].appendChild(wrap);
+        } else {
+          const ring = document.createElement('div');
+          ring.className='magic-ring';
+          cellRefs[cy][cx].appendChild(ring);
+        }
+
         function coordOnPerimeter(layer, idx){
-          const r = layer;                // 1..N
-          const S = r*2 + 1;              // rozmiar kwadratu tej warstwy
-          const P = S*4 - 4;              // liczba pól na obwodzie
+          const r = layer;                
+          const S = r*2 + 1;              
+          const P = S*4 - 4;              
           const k = idx % P;
-
-          // start: górna krawędź (od lewej do prawej), pomijając lewy górny róg duplikowany przez krawędzie
           let x = cx - r, y = cy - r;
-          if (k < S-1){                   // top: (x+1..x+S-1, y)
-            x += 1 + k;                   // przesuwamy w prawo
-          } else if (k < (S-1)+(S-1)){    // right: (cx+r, y+1..y+S-1)
-            x = cx + r;
-            y += 1 + (k - (S-1));
-          } else if (k < (S-1)*3){        // bottom: (x+S-2..x .. w lewo)
-            y = cy + r;
-            x = cx + r - 1 - (k - (S-1)*2);
-          } else {                         // left: (cx-r, y+S-2..y+1 .. w górę)
-            x = cx - r;
-            y = cy + r - 1 - (k - (S-1)*3);
-          }
+          if (k < S-1){ x += 1 + k; } 
+          else if (k < (S-1)+(S-1)){ x = cx + r; y += 1 + (k - (S-1)); } 
+          else if (k < (S-1)*3){ y = cy + r; x = cx + r - 1 - (k - (S-1)*2); } 
+          else { x = cx - r; y = cy + r - 1 - (k - (S-1)*3); }
           return {x,y};
         }
 
-        // Umieszczamy symbole warstwami
+        const orientEnabled = model.squareOrientInward;
+        const orientOffsetDeg = model.squareOrientOffset;
+
         model.rows.forEach((layerArr, layerIndex)=>{
-          const layer = layerIndex+1; // warstwa 1 to kwadrat 3x3 wokół centrum
+          const layer = layerIndex+1;
           layerArr.forEach((symObject, idx)=>{
             const {x,y} = coordOnPerimeter(layer, idx);
             const wrap = document.createElement('span');
@@ -402,12 +441,21 @@
             }
             wrap.onclick = (e)=>{ e.stopPropagation(); model.selectedRow = layerIndex; model.selected = {rowIndex: layerIndex, symIndex: idx}; render(); syncControlsToSelection(); };
 
+            // Oblicz kąt do środka (atan2 zwraca 0° na wschód, rośnie przeciwnie do wskazówek)
+            let angleToCenter = 0;
+            if (orientEnabled){
+              const dx = cx - x;
+              const dy = cy - y;
+              angleToCenter = Math.atan2(dy, dx) * 180 / Math.PI; // -180..180, 0° = prawo
+              angleToCenter = clampAngle(angleToCenter + orientOffsetDeg);
+            }
+
             const img=document.createElement('img');
             img.src = symbolRegistry.get(symObject.sym) || '';
-            // w trybie square skaluje się do komórki
             img.style.maxWidth = Math.floor(cell*0.9) + 'px';
             img.style.maxHeight= Math.floor(cell*0.9) + 'px';
-            img.style.transform = `scaleX(${symObject.flipX ? -1 : 1}) rotate(${symObject.rotation}deg)`;
+            const totalRotation = clampAngle((symObject.rotation || 0) + angleToCenter);
+            img.style.transform = `scaleX(${symObject.flipX ? -1 : 1}) rotate(${totalRotation}deg)`;
             wrap.appendChild(img);
 
             cellRefs[y][x].appendChild(wrap);
@@ -423,13 +471,10 @@
     document.getElementById('btn-add').onclick=()=>{
       if(!model.currentSym) return;
       const targetRow = model.selectedRow;
-      // jeśli nie ma żadnego rzędu/warstwy – utwórz
       if(model.rows.length===0){ model.rows=[[]]; }
       if(!model.rows[targetRow]){ model.rows[targetRow]=[]; }
-
       model.rows[targetRow].push({ sym: model.currentSym, rotation: model.currentRotation, flipX: model.currentFlipX });
-      render();
-      saveState();
+      render(); saveState();
     };
 
     document.getElementById('btn-undo').onclick = () => {
@@ -444,8 +489,7 @@
         model.rows.splice(model.selectedRow, 1);
         model.selectedRow = Math.max(0, model.selectedRow - 1);
       }
-      render();
-      saveState();
+      render(); saveState();
     };
 
     document.getElementById('btn-delete').onclick = () => {
@@ -460,8 +504,7 @@
       model.rows.push([]);
       model.selectedRow=model.rows.length-1;
       clearSelection();
-      render();
-      saveState();
+      render(); saveState();
     };
 
     sizeInput.onchange = ()=>{ model.size = Math.max(16, Math.min(64, Number(sizeInput.value)||28)); render(); saveState(); };
@@ -476,16 +519,12 @@
 
     layoutMode.onchange = () => {
       model.layout = layoutMode.value;
-      // domyślne minimum struktur danych
       if(model.layout==='linear' && model.rows.length===0){ model.rows=[[]]; }
-      if(model.layout==='square'){
-        // w square sensownie jest mieć przynajmniej 1 warstwę („pierścień” wokół środka)
-        if(model.rows.length===0) model.rows=[[]];
-      }
+      if(model.layout==='square'){ if(model.rows.length===0) model.rows=[[]]; }
       render(); saveState();
     };
 
-    // Obracanie / flip
+    // Obrót/flip zwykłych symboli
     function applyRotationToTarget(value){
       const sel = getSelected();
       if(sel){ sel.item.rotation = value; } else { model.currentRotation = value; }
@@ -505,8 +544,7 @@
       render(); saveState();
     }
     function clampAngle(a){ a = ((a + 180) % 360 + 360) % 360 - 180; return Math.round(a); }
-
-    symRotation.oninput = () => { const v = Number(symRotation.value); rotationValue.value = v; applyRotationToTarget(v); };
+    document.getElementById('sym-rotation').oninput = () => { const v = Number(symRotation.value); rotationValue.value = v; applyRotationToTarget(v); };
     rotationValue.onchange = () => { let v = Number(rotationValue.value)||0; v = clampAngle(v); symRotation.value = v; applyRotationToTarget(v); };
     btnResetRotation.onclick = () => { symRotation.value = 0; rotationValue.value = 0; applyRotationToTarget(0); };
     btnRotMinus.onclick = ()=> nudgeRotation(-15);
@@ -515,6 +553,45 @@
       const sel = getSelected();
       if(sel){ sel.item.flipX = !sel.item.flipX; }
       else{ model.currentFlipX = !model.currentFlipX; btnFlip.classList.toggle('active', model.currentFlipX); }
+      render(); saveState();
+    };
+
+    // ŚRODEK – logika
+    btnCenterFromSel.onclick = ()=>{
+      if(!model.currentSym) return;
+      model.center = { sym: model.currentSym, scale: (Number(centerScale.value)||90)/100, rotation: Number(centerRot.value)||0, flipX:false };
+      render(); saveState();
+    };
+    btnCenterClear.onclick = ()=>{
+      model.center = null;
+      render(); saveState();
+    };
+    centerScale.oninput = ()=>{
+      if(!model.center) return;
+      model.center.scale = (Number(centerScale.value)||90)/100;
+      render(); saveState();
+    };
+    centerRot.oninput = ()=>{
+      if(!model.center) return;
+      model.center.rotation = clampAngle(Number(centerRot.value)||0);
+      render(); saveState();
+    };
+    centerFlip.onclick = ()=>{
+      if(!model.center) return;
+      model.center.flipX = !model.center.flipX;
+      render(); saveState();
+    };
+
+    // Orientacja do środka – UI
+    orientInward.onchange = ()=>{ model.squareOrientInward = orientInward.checked; render(); saveState(); };
+    orientOffset.oninput = ()=>{
+      model.squareOrientOffset = Number(orientOffset.value)||0;
+      orientOffsetVal.value = model.squareOrientOffset;
+      render(); saveState();
+    };
+    orientOffsetVal.onchange = ()=>{
+      model.squareOrientOffset = Number(orientOffsetVal.value)||0;
+      orientOffset.value = model.squareOrientOffset;
       render(); saveState();
     };
 
@@ -534,16 +611,12 @@
 
     function applyState(state) {
       if (!state || (!state.rows && !Array.isArray(state.rows))) { return; }
-
-      // kompatybilność wsteczna: stare zapisy trzymały stringi
       if (state.rows?.length > 0 && state.rows[0]?.length > 0 && typeof state.rows[0][0] === 'string') {
         state.rows = state.rows.map(row => row.map(sym => ({ sym: sym, rotation: 0, flipX: false })));
       } else if (state.rows){
         state.rows = state.rows.map(row => row.map(obj => ({ sym: obj.sym, rotation: obj.rotation||0, flipX: !!obj.flipX })));
       }
-
       Object.assign(model, state);
-
       model.layout = state.layout || 'linear';
       model.numbering = state.numbering || { enabled: true, placement: 'both', size: 16, color: '#6b7280' };
       model.selectedRow = state.selectedRow ?? (model.rows.length > 0 ? model.rows.length - 1 : 0);
@@ -551,7 +624,15 @@
       model.currentFlipX = !!state.currentFlipX;
       model.selected = null;
 
-      // Aktualizacja UI
+      if (model.center) {
+        model.center.scale = Number(model.center.scale)||0.9;
+        model.center.rotation = Number(model.center.rotation)||0;
+        model.center.flipX = !!model.center.flipX;
+      }
+      // orientacja – domyślki gdy brak
+      model.squareOrientInward = state.squareOrientInward ?? true;
+      model.squareOrientOffset = Number(state.squareOrientOffset ?? -90);
+
       sizeInput.value = model.size;
       gapInput.value = model.gap;
       alignSelect.value = model.align;
@@ -559,12 +640,12 @@
       symRotation.value = model.currentRotation;
       rotationValue.value = model.currentRotation;
       layoutMode.value = model.layout;
-
       numEnabled.checked = model.numbering.enabled;
       numPlacement.value = model.numbering.placement;
       numSize.value = model.numbering.size;
       numColor.value = model.numbering.color;
 
+      syncControlsToSelection();
       render();
     }
 
@@ -574,6 +655,7 @@
         try {
           const savedState = JSON.parse(savedStateJSON);
           applyState(savedState);
+          saveState(); 
         } catch (e) {
           console.error("Błąd parsowania zapisanego stanu:", e);
           localStorage.removeItem('crochetPatternAutosave');
@@ -582,7 +664,6 @@
       } else {
         applyState(model);
       }
-      syncControlsToSelection();
     }
 
     document.getElementById('btn-save-file').onclick = () => {
@@ -622,8 +703,6 @@
     async function exportPDF(){
       const { jsPDF } = window.jspdf;
       const orient = document.getElementById('pdf-orient').value;
-
-      // przygotuj węzeł do zrzutu, zależnie od trybu
       let exportRoot;
 
       if(model.layout === 'linear'){
@@ -656,7 +735,7 @@
           exportRoot.appendChild(er);
         });
       } else {
-        // tryb kwadratowy – budujemy mini scenę jak w render()
+        // eksport trybu kwadratowego
         exportRoot = document.createElement('div');
         const layers = model.rows.length;
         const radius = Math.max(1, layers);
@@ -669,7 +748,6 @@
         stage.style.gridTemplateRows   = `repeat(${gridSize}, ${cell}px)`;
         exportRoot.appendChild(stage);
 
-        // komórki
         const cellRefs=[];
         for(let y=0;y<gridSize;y++){
           const row=[];
@@ -682,14 +760,26 @@
           cellRefs.push(row);
         }
         const cx = radius, cy = radius;
-        const ring = document.createElement('div');
-        ring.style.width = Math.floor(cell*0.7)+'px';
-        ring.style.height= Math.floor(cell*0.7)+'px';
-        ring.style.borderRadius='999px';
-        ring.style.border='2px solid #11182755';
-        ring.style.boxShadow='inset 0 0 0 2px #11182722';
-        ring.style.background='#ffffff';
-        cellRefs[cy][cx].appendChild(ring);
+
+        // środek
+        if (model.center?.sym && symbolRegistry.has(model.center.sym)) {
+          const img=document.createElement('img');
+          img.src = symbolRegistry.get(model.center.sym);
+          const scale = model.center.scale ?? 0.9;
+          img.style.maxWidth  = Math.floor(cell*scale) + 'px';
+          img.style.maxHeight = Math.floor(cell*scale) + 'px';
+          img.style.transform = `scaleX(${model.center.flipX ? -1 : 1}) rotate(${model.center.rotation||0}deg)`;
+          cellRefs[cy][cx].appendChild(img);
+        } else {
+          const ring = document.createElement('div');
+          ring.style.width = Math.floor(cell*0.7)+'px';
+          ring.style.height= Math.floor(cell*0.7)+'px';
+          ring.style.borderRadius='999px';
+          ring.style.border='2px solid #11182755';
+          ring.style.boxShadow='inset 0 0 0 2px #11182722';
+          ring.style.background='#ffffff';
+          cellRefs[cy][cx].appendChild(ring);
+        }
 
         function coordOnPerimeter(layer, idx){
           const r = layer; const S = r*2+1; const P = S*4-4; const k = idx%P;
@@ -701,6 +791,9 @@
           return {x,y};
         }
 
+        const orientEnabled = model.squareOrientInward;
+        const orientOffsetDeg = model.squareOrientOffset;
+
         model.rows.forEach((layerArr, layerIndex)=>{
           const layer = layerIndex+1;
           layerArr.forEach((symObject, idx)=>{
@@ -709,7 +802,17 @@
             img.src = symbolRegistry.get(symObject.sym) || '';
             img.style.maxWidth = Math.floor(cell*0.9) + 'px';
             img.style.maxHeight= Math.floor(cell*0.9) + 'px';
-            img.style.transform = `scaleX(${symObject.flipX ? -1 : 1}) rotate(${symObject.rotation}deg)`;
+
+            let angleToCenter = 0;
+            if (orientEnabled){
+              const dx = cx - x;
+              const dy = cy - y;
+              angleToCenter = Math.atan2(dy, dx) * 180 / Math.PI;
+              angleToCenter = ((angleToCenter + 180) % 360) - 180;
+              angleToCenter = ((angleToCenter + orientOffsetDeg + 180) % 360) - 180;
+            }
+            const totalRotation = (( (symObject.rotation||0) + angleToCenter + 180) % 360) - 180;
+            img.style.transform = `scaleX(${symObject.flipX ? -1 : 1}) rotate(${totalRotation}deg)`;
             cellRefs[y][x].appendChild(img);
           });
         });
@@ -732,6 +835,11 @@
 
     // start
     loadState();
+
+    // (rezerwowane pod skróty w przyszłości)
+    window.addEventListener('keydown', (e)=>{
+      if(e.key==='c' && (e.ctrlKey||e.metaKey)) e.preventDefault();
+    });
   </script>
 </body>
 </html>
