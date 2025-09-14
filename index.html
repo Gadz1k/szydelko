@@ -164,7 +164,10 @@
 
       <div class="controls">
         <label class="checkbox-label" title="Automatycznie obraca symbole na obwodzie w stronę środka">
-          <input type="checkbox" id="orient-inward"> Orientuj symbole do środka
+          <input type="checkbox" id="orient-inward" checked> Orientuj symbole do środka
+        </label>
+        <label class="checkbox-label" title="Zastosuj orientację tylko dla narożników">
+          <input type="checkbox" id="orient-corners-only" checked> Tylko rogi
         </label>
         <label title="Korekta bazowego kierunku SVG (gdy symbole domyślnie są 'do góry' lub 'w prawo')">
           Offset orientacji (°)
@@ -204,7 +207,7 @@
 
     const model = {
       layout: 'linear',              // 'linear' | 'square'
-      rows:[[]],                     // w 'linear': rzędy; w 'square': warstwy (perymetry)
+      rows:[[]],
       currentSym:null,
       selectedRow:0,
       size:28,
@@ -217,7 +220,8 @@
       numbering: { enabled: true, placement: 'both', size: 16, color: '#6b7280' },
       center: null,                  // { sym, scale, rotation, flipX }
       squareOrientInward: true,
-      squareOrientOffset: -90        // korekta w stopniach
+      squareOrientCornersOnly: true, // rogi do środka, boki stałe
+      squareOrientOffset: -90
     };
     const symbolRegistry = new Map();
 
@@ -249,6 +253,7 @@
     const centerRot        = document.getElementById('center-rot');
     const centerFlip       = document.getElementById('center-flip');
     const orientInward     = document.getElementById('orient-inward');
+    const orientCornersOnly= document.getElementById('orient-corners-only');
     const orientOffset     = document.getElementById('orient-offset');
     const orientOffsetVal  = document.getElementById('orient-offset-val');
 
@@ -322,6 +327,7 @@
       centerScale.value = Math.round((model.center?.scale ?? 0.9) * 100);
       centerRot.value   = model.center?.rotation ?? 0;
       orientInward.checked = model.squareOrientInward;
+      orientCornersOnly.checked = model.squareOrientCornersOnly;
       orientOffset.value = model.squareOrientOffset;
       orientOffsetVal.value = model.squareOrientOffset;
     }
@@ -428,12 +434,30 @@
         }
 
         const orientEnabled = model.squareOrientInward;
+        const cornersOnly   = model.squareOrientCornersOnly;
         const orientOffsetDeg = model.squareOrientOffset;
+
+        // Stałe kąty dla boków
+        function sideAngle(x,y,minX,maxX,minY,maxY){
+          if (y === minY && x > minX && x < maxX) return 0;     // góra
+          if (x === maxX && y > minY && y < maxY) return -90;   // prawy bok -> w lewo
+          if (y === maxY && x > minX && x < maxX) return 180;   // dół
+          if (x === minX && y > minY && y < maxY) return 90;    // lewy bok -> w prawo
+          return 0; // narożniki
+        }
 
         model.rows.forEach((layerArr, layerIndex)=>{
           const layer = layerIndex+1;
+          const minX = cx - layer, maxX = cx + layer, minY = cy - layer, maxY = cy + layer;
+
           layerArr.forEach((symObject, idx)=>{
             const {x,y} = coordOnPerimeter(layer, idx);
+            const isTL = (x===minX && y===minY);
+            const isTR = (x===maxX && y===minY);
+            const isBR = (x===maxX && y===maxY);
+            const isBL = (x===minX && y===maxY);
+            const isCorner = isTL || isTR || isBR || isBL;
+
             const wrap = document.createElement('span');
             wrap.className = 'sym-instance';
             if(model.selected && model.selected.rowIndex===layerIndex && model.selected.symIndex===idx){
@@ -441,20 +465,31 @@
             }
             wrap.onclick = (e)=>{ e.stopPropagation(); model.selectedRow = layerIndex; model.selected = {rowIndex: layerIndex, symIndex: idx}; render(); syncControlsToSelection(); };
 
-            // Oblicz kąt do środka (atan2 zwraca 0° na wschód, rośnie przeciwnie do wskazówek)
-            let angleToCenter = 0;
-            if (orientEnabled){
-              const dx = cx - x;
-              const dy = cy - y;
-              angleToCenter = Math.atan2(dy, dx) * 180 / Math.PI; // -180..180, 0° = prawo
-              angleToCenter = clampAngle(angleToCenter + orientOffsetDeg);
+            let autoAngle = 0;
+
+            if (cornersOnly) {
+              // Boki – stałe kąty, rogi – do środka
+              autoAngle = sideAngle(x,y,minX,maxX,minY,maxY);
+              if (isCorner && orientEnabled){
+                const dx = cx - x, dy = cy - y;
+                autoAngle = clampAngle(Math.atan2(dy, dx) * 180 / Math.PI + orientOffsetDeg);
+                // FIX: prawy-górny i lewy-dolny rog – odwróć o 180°
+                if (isTR || isBL) autoAngle = clampAngle(autoAngle + 180);
+              }
+            } else if (orientEnabled) {
+              // Wszystkie pozycje do środka
+              const dx = cx - x, dy = cy - y;
+              autoAngle = clampAngle(Math.atan2(dy, dx) * 180 / Math.PI + orientOffsetDeg);
+            } else {
+              // Brak auto-orientacji: tylko stałe kąty dla boków
+              autoAngle = sideAngle(x,y,minX,maxX,minY,maxY);
             }
 
             const img=document.createElement('img');
             img.src = symbolRegistry.get(symObject.sym) || '';
             img.style.maxWidth = Math.floor(cell*0.9) + 'px';
             img.style.maxHeight= Math.floor(cell*0.9) + 'px';
-            const totalRotation = clampAngle((symObject.rotation || 0) + angleToCenter);
+            const totalRotation = clampAngle((symObject.rotation || 0) + autoAngle);
             img.style.transform = `scaleX(${symObject.flipX ? -1 : 1}) rotate(${totalRotation}deg)`;
             wrap.appendChild(img);
 
@@ -584,6 +619,7 @@
 
     // Orientacja do środka – UI
     orientInward.onchange = ()=>{ model.squareOrientInward = orientInward.checked; render(); saveState(); };
+    orientCornersOnly.onchange = ()=>{ model.squareOrientCornersOnly = orientCornersOnly.checked; render(); saveState(); };
     orientOffset.oninput = ()=>{
       model.squareOrientOffset = Number(orientOffset.value)||0;
       orientOffsetVal.value = model.squareOrientOffset;
@@ -629,8 +665,8 @@
         model.center.rotation = Number(model.center.rotation)||0;
         model.center.flipX = !!model.center.flipX;
       }
-      // orientacja – domyślki gdy brak
       model.squareOrientInward = state.squareOrientInward ?? true;
+      model.squareOrientCornersOnly = state.squareOrientCornersOnly ?? true;
       model.squareOrientOffset = Number(state.squareOrientOffset ?? -90);
 
       sizeInput.value = model.size;
@@ -792,26 +828,48 @@
         }
 
         const orientEnabled = model.squareOrientInward;
+        const cornersOnly   = model.squareOrientCornersOnly;
         const orientOffsetDeg = model.squareOrientOffset;
+
+        function sideAngle(x,y,minX,maxX,minY,maxY){
+          if (y === minY && x > minX && x < maxX) return 0;
+          if (x === maxX && y > minY && y < maxY) return -90;
+          if (y === maxY && x > minX && x < maxX) return 180;
+          if (x === minX && y > minY && y < maxY) return 90;
+          return 0;
+        }
 
         model.rows.forEach((layerArr, layerIndex)=>{
           const layer = layerIndex+1;
+          const minX = cx - layer, maxX = cx + layer, minY = cy - layer, maxY = cy + layer;
+
           layerArr.forEach((symObject, idx)=>{
             const {x,y} = coordOnPerimeter(layer, idx);
+            const isTR = (x===maxX && y===minY);
+            const isBL = (x===minX && y===maxY);
+            const isCorner = (x===minX && y===minY) || isTR || (x===maxX && y===maxY) || isBL;
+
+            let autoAngle = 0;
+            if (cornersOnly) {
+              autoAngle = sideAngle(x,y,minX,maxX,minY,maxY);
+              if (isCorner && orientEnabled){
+                const dx = cx - x, dy = cy - y;
+                autoAngle = ((Math.atan2(dy, dx) * 180 / Math.PI) + orientOffsetDeg + 540) % 360 - 180;
+                // FIX w eksporcie: TR i BL +180°
+                if (isTR || isBL) autoAngle = ((autoAngle + 180 + 540) % 360) - 180;
+              }
+            } else if (orientEnabled) {
+              const dx = cx - x, dy = cy - y;
+              autoAngle = ((Math.atan2(dy, dx) * 180 / Math.PI) + orientOffsetDeg + 540) % 360 - 180;
+            } else {
+              autoAngle = sideAngle(x,y,minX,maxX,minY,maxY);
+            }
+
             const img=document.createElement('img');
             img.src = symbolRegistry.get(symObject.sym) || '';
             img.style.maxWidth = Math.floor(cell*0.9) + 'px';
             img.style.maxHeight= Math.floor(cell*0.9) + 'px';
-
-            let angleToCenter = 0;
-            if (orientEnabled){
-              const dx = cx - x;
-              const dy = cy - y;
-              angleToCenter = Math.atan2(dy, dx) * 180 / Math.PI;
-              angleToCenter = ((angleToCenter + 180) % 360) - 180;
-              angleToCenter = ((angleToCenter + orientOffsetDeg + 180) % 360) - 180;
-            }
-            const totalRotation = (( (symObject.rotation||0) + angleToCenter + 180) % 360) - 180;
+            const totalRotation = (( (symObject.rotation||0) + autoAngle + 540) % 360) - 180;
             img.style.transform = `scaleX(${symObject.flipX ? -1 : 1}) rotate(${totalRotation}deg)`;
             cellRefs[y][x].appendChild(img);
           });
@@ -835,11 +893,6 @@
 
     // start
     loadState();
-
-    // (rezerwowane pod skróty w przyszłości)
-    window.addEventListener('keydown', (e)=>{
-      if(e.key==='c' && (e.ctrlKey||e.metaKey)) e.preventDefault();
-    });
   </script>
 </body>
 </html>
