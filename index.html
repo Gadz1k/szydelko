@@ -35,7 +35,8 @@
     .controls button:hover{background:var(--btn-hover)}
     .controls label.checkbox-label{display:flex;align-items:center;gap:4px;padding:8px 10px;border-radius:10px;border:1px solid var(--border);background:var(--btn)}
 
-    .canvas{background:#ffffff;border:1px solid var(--border);border-radius:12px;min-height:520px;padding:16px;display:flex;flex-direction:column-reverse; gap: 8px;}
+    /* Tryb liniowy (dotychczasowy) */
+    .canvas.linear{background:#ffffff;border:1px solid var(--border);border-radius:12px;min-height:520px;padding:16px;display:flex;flex-direction:column-reverse; gap: 8px;}
     .row{display:flex;gap:10px;justify-content:center;padding:4px;align-items:flex-start; cursor: default;}
     .row.active { background-color: var(--btn-hover); border-radius: 6px; }
     .row[data-align="left"]{justify-content:flex-start}
@@ -54,6 +55,23 @@
 
     .row-number { font-weight: 500; width: 24px; text-align: center; align-self: center; flex-shrink: 0; }
     .hint{font-size:12px;color:var(--muted)}
+
+    /* NOWE: Tryb kwadratowy wokół magic ring */
+    .canvas.square{background:#ffffff;border:1px solid var(--border);border-radius:12px;min-height:520px;padding:16px;display:flex;align-items:center;justify-content:center;}
+    .square-stage{display:grid;gap:0}
+    .cell{display:flex;align-items:center;justify-content:center;position:relative}
+    .cell .sym-instance{padding:0}
+    .magic-ring{
+      width: calc(var(--cell) * 0.7);
+      height: calc(var(--cell) * 0.7);
+      border-radius:999px;
+      border:2px solid #11182755;
+      box-shadow: inset 0 0 0 2px #11182722;
+      background: #ffffff;
+    }
+
+    /* UI pomocnicze */
+    .badge{font-size:12px;padding:2px 6px;border:1px solid var(--border);border-radius:999px;background:var(--btn);color:var(--muted)}
   </style>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
@@ -83,11 +101,18 @@
         <button id="btn-add">➕ Dodaj symbol</button>
         <button id="btn-undo">↩️ Cofnij</button>
         <button id="btn-delete">🗑️ Usuń zaznaczony</button>
-        <button id="btn-newrow">⏎ Nowy rząd</button>
+        <button id="btn-newrow">⏎ Nowy rząd/warstwa</button>
+        <span id="mode-badge" class="badge">Tryb: rzędy</span>
       </div>
 
       <h3>Ustawienia</h3>
       <div class="controls">
+        <label>Tryb układania
+          <select id="layout-mode">
+            <option value="linear">Rzędy (lista)</option>
+            <option value="square">Kwadrat wokół magic ring</option>
+          </select>
+        </label>
         <label>Rozmiar
           <input id="size" type="number" min="16" max="64" value="28" style="width:72px">
         </label>
@@ -145,7 +170,7 @@
       </div>
     </aside>
     <main>
-      <div id="canvas" class="canvas"></div>
+      <div id="canvas" class="canvas linear"></div>
     </main>
   </div>
 
@@ -156,12 +181,13 @@
     const fileLoader = document.getElementById('file-loader');
 
     const model = {
-      rows:[[]],                     // każde pole to: { sym, rotation, flipX }
+      layout: 'linear',              // 'linear' | 'square'
+      rows:[[]],                     // w 'linear': tablica rzędów; w 'square': tablica WARSTW (perymetrów)
       currentSym:null,
-      selectedRow:0,
+      selectedRow:0,                 // rząd lub warstwa
       size:28,
       gap:10,
-      align:'center',
+      align:'center',                // używane w 'linear'
       maxRatio:1.4,
       currentRotation: 0,
       currentFlipX: false,
@@ -183,10 +209,7 @@
         if(!f.name.endsWith('.svg')) continue;
         const key = f.name.replace(/\.svg$/i,'');
         const reader = new FileReader();
-        reader.onload = ()=>{
-          symbolRegistry.set(key, reader.result);
-          rebuildToolbar();
-        };
+        reader.onload = ()=>{ symbolRegistry.set(key, reader.result); rebuildToolbar(); };
         reader.readAsDataURL(f);
       }
     };
@@ -223,6 +246,8 @@
     const numPlacement = document.getElementById('num-placement');
     const numSize = document.getElementById('num-size');
     const numColor = document.getElementById('num-color');
+    const layoutMode = document.getElementById('layout-mode');
+    const modeBadge = document.getElementById('mode-badge');
 
     const symRotation = document.getElementById('sym-rotation');
     const rotationValue = document.getElementById('rotation-value');
@@ -265,59 +290,144 @@
       }
     }
 
+    /* ---------- RENDER ---------- */
     function render(){
+      canvas.className = 'canvas ' + model.layout;
       canvas.innerHTML='';
-      model.rows.forEach((row, rowIndex)=>{
-        const r=document.createElement('div');
-        r.className='row';
-        r.style.gap = model.gap + 'px';
-        r.dataset.align = model.align;
-        r.style.justifyContent = model.align==='left'?'flex-start':model.align==='right'?'flex-end':'center';
-        r.style.minHeight = model.size + 'px';
-        if (rowIndex === model.selectedRow) { r.classList.add('active'); }
-        r.onclick = (e) => {
-          // klik w tło rzędu – zaznacza rząd, ale odznacza symbol
-          if(e.target === r){ model.selectedRow = rowIndex; clearSelection(); }
-        };
 
-        if (model.numbering.enabled && (model.numbering.placement === 'left' || model.numbering.placement === 'both')) {
-          r.appendChild(createNumberSpan(rowIndex));
+      if(model.layout === 'linear'){
+        // klasyczny widok „rzędy”
+        model.rows.forEach((row, rowIndex)=>{
+          const r=document.createElement('div');
+          r.className='row';
+          r.style.gap = model.gap + 'px';
+          r.dataset.align = model.align;
+          r.style.justifyContent = model.align==='left'?'flex-start':model.align==='right'?'flex-end':'center';
+          r.style.minHeight = model.size + 'px';
+          if (rowIndex === model.selectedRow) { r.classList.add('active'); }
+          r.onclick = (e) => { if(e.target === r){ model.selectedRow = rowIndex; clearSelection(); } };
+
+          if (model.numbering.enabled && (model.numbering.placement === 'left' || model.numbering.placement === 'both')) {
+            r.appendChild(createNumberSpan(rowIndex));
+          }
+
+          row.forEach((symObject, symIndex)=>{
+            const wrap = document.createElement('span');
+            wrap.className = 'sym-instance';
+            if(model.selected && model.selected.rowIndex===rowIndex && model.selected.symIndex===symIndex){
+              wrap.classList.add('selected');
+            }
+            wrap.onclick = (e)=>{ e.stopPropagation(); model.selectedRow = rowIndex; model.selected = {rowIndex, symIndex}; render(); syncControlsToSelection(); };
+            const img=document.createElement('img');
+            img.src=symbolRegistry.get(symObject.sym) || '';
+            img.style.width = 'auto';
+            img.style.maxWidth = (model.size * model.maxRatio) + 'px';
+            img.style.transform = `scaleX(${symObject.flipX ? -1 : 1}) rotate(${symObject.rotation}deg)`;
+            wrap.appendChild(img);
+            r.appendChild(wrap);
+          });
+
+          if (model.numbering.enabled && (model.numbering.placement === 'right' || model.numbering.placement === 'both')) {
+            r.appendChild(createNumberSpan(rowIndex));
+          }
+          canvas.appendChild(r);
+        });
+        modeBadge.textContent = 'Tryb: rzędy';
+      } else {
+        // tryb kwadratowy wokół magic ring
+        const layers = model.rows.length;            // 0..N-1 (0 też dopuszczamy, ale min 1 dla pierścienia)
+        const radius = Math.max(1, layers);          // żeby zawsze mieć środek
+        const gridSize = radius * 2 + 1;             // np. 1 warstwa => 3x3, 2 warstwy => 5x5
+        const cell = Math.max(10, model.size + model.gap); // rozmiar komórki zależny od size+gap
+        const stage = document.createElement('div');
+        stage.className = 'square-stage';
+        stage.style.setProperty('--cell', cell + 'px');
+        stage.style.gridTemplateColumns = `repeat(${gridSize}, ${cell}px)`;
+        stage.style.gridTemplateRows = `repeat(${gridSize}, ${cell}px)`;
+
+        // Budujemy tabelę pustych komórek
+        const cellRefs = []; // [y][x]
+        for(let y=0;y<gridSize;y++){
+          const row = [];
+          for(let x=0;x<gridSize;x++){
+            const c = document.createElement('div');
+            c.className='cell';
+            c.style.width = cell+'px';
+            c.style.height= cell+'px';
+            stage.appendChild(c);
+            row.push(c);
+          }
+          cellRefs.push(row);
         }
 
-        row.forEach((symObject, symIndex)=>{
-          const wrap = document.createElement('span');
-          wrap.className = 'sym-instance';
-          // zaznaczenie?
-          if(model.selected && model.selected.rowIndex===rowIndex && model.selected.symIndex===symIndex){
-            wrap.classList.add('selected');
-          }
-          wrap.onclick = (e)=>{
-            e.stopPropagation();
-            model.selectedRow = rowIndex;
-            model.selected = {rowIndex, symIndex};
-            render();
-            syncControlsToSelection();
-          };
+        // Środek – magic ring
+        const cx = radius, cy = radius;
+        const ring = document.createElement('div');
+        ring.className='magic-ring';
+        cellRefs[cy][cx].appendChild(ring);
 
-          const img=document.createElement('img');
-          img.src=symbolRegistry.get(symObject.sym) || '';
-          img.style.width = 'auto';
-          img.style.maxWidth = (model.size * model.maxRatio) + 'px';
-          img.style.transform = `scaleX(${symObject.flipX ? -1 : 1}) rotate(${symObject.rotation}deg)`;
-          wrap.appendChild(img);
-          r.appendChild(wrap);
+        // Funkcja: współrzędne k-tego elementu na obwodzie kwadratu dla danej warstwy
+        function coordOnPerimeter(layer, idx){
+          const r = layer;                // 1..N
+          const S = r*2 + 1;              // rozmiar kwadratu tej warstwy
+          const P = S*4 - 4;              // liczba pól na obwodzie
+          const k = idx % P;
+
+          // start: górna krawędź (od lewej do prawej), pomijając lewy górny róg duplikowany przez krawędzie
+          let x = cx - r, y = cy - r;
+          if (k < S-1){                   // top: (x+1..x+S-1, y)
+            x += 1 + k;                   // przesuwamy w prawo
+          } else if (k < (S-1)+(S-1)){    // right: (cx+r, y+1..y+S-1)
+            x = cx + r;
+            y += 1 + (k - (S-1));
+          } else if (k < (S-1)*3){        // bottom: (x+S-2..x .. w lewo)
+            y = cy + r;
+            x = cx + r - 1 - (k - (S-1)*2);
+          } else {                         // left: (cx-r, y+S-2..y+1 .. w górę)
+            x = cx - r;
+            y = cy + r - 1 - (k - (S-1)*3);
+          }
+          return {x,y};
+        }
+
+        // Umieszczamy symbole warstwami
+        model.rows.forEach((layerArr, layerIndex)=>{
+          const layer = layerIndex+1; // warstwa 1 to kwadrat 3x3 wokół centrum
+          layerArr.forEach((symObject, idx)=>{
+            const {x,y} = coordOnPerimeter(layer, idx);
+            const wrap = document.createElement('span');
+            wrap.className = 'sym-instance';
+            if(model.selected && model.selected.rowIndex===layerIndex && model.selected.symIndex===idx){
+              wrap.classList.add('selected');
+            }
+            wrap.onclick = (e)=>{ e.stopPropagation(); model.selectedRow = layerIndex; model.selected = {rowIndex: layerIndex, symIndex: idx}; render(); syncControlsToSelection(); };
+
+            const img=document.createElement('img');
+            img.src = symbolRegistry.get(symObject.sym) || '';
+            // w trybie square skaluje się do komórki
+            img.style.maxWidth = Math.floor(cell*0.9) + 'px';
+            img.style.maxHeight= Math.floor(cell*0.9) + 'px';
+            img.style.transform = `scaleX(${symObject.flipX ? -1 : 1}) rotate(${symObject.rotation}deg)`;
+            wrap.appendChild(img);
+
+            cellRefs[y][x].appendChild(wrap);
+          });
         });
 
-        if (model.numbering.enabled && (model.numbering.placement === 'right' || model.numbering.placement === 'both')) {
-          r.appendChild(createNumberSpan(rowIndex));
-        }
-        canvas.appendChild(r);
-      });
+        canvas.appendChild(stage);
+        modeBadge.textContent = 'Tryb: magic ring (kwadrat)';
+      }
     }
 
+    /* ---------- AKCJE ---------- */
     document.getElementById('btn-add').onclick=()=>{
       if(!model.currentSym) return;
-      model.rows[model.selectedRow].push({ sym: model.currentSym, rotation: model.currentRotation, flipX: model.currentFlipX });
+      const targetRow = model.selectedRow;
+      // jeśli nie ma żadnego rzędu/warstwy – utwórz
+      if(model.rows.length===0){ model.rows=[[]]; }
+      if(!model.rows[targetRow]){ model.rows[targetRow]=[]; }
+
+      model.rows[targetRow].push({ sym: model.currentSym, rotation: model.currentRotation, flipX: model.currentFlipX });
       render();
       saveState();
     };
@@ -325,13 +435,12 @@
     document.getElementById('btn-undo').onclick = () => {
       let currentRow = model.rows[model.selectedRow];
       if (model.selected && model.selected.rowIndex===model.selectedRow){
-        // cofnięcie ostatniej edycji – tu uproszczenie: usuń zaznaczony
         const {symIndex} = model.selected;
         currentRow.splice(symIndex,1);
         clearSelection();
       } else if (currentRow && currentRow.length > 0) {
         currentRow.pop();
-      } else if (model.rows.length > 1 && model.rows[model.selectedRow].length === 0) {
+      } else if (model.rows.length > 1 && model.rows[model.selectedRow]?.length === 0) {
         model.rows.splice(model.selectedRow, 1);
         model.selectedRow = Math.max(0, model.selectedRow - 1);
       }
@@ -365,16 +474,22 @@
     numSize.onchange = () => { model.numbering.size = Number(numSize.value); render(); saveState(); };
     numColor.onchange = () => { model.numbering.color = numColor.value; render(); saveState(); };
 
-    // Obracanie – jeśli jest zaznaczony symbol, modyfikuje jego rotation; w przeciwnym razie ustawia „domyślne”
+    layoutMode.onchange = () => {
+      model.layout = layoutMode.value;
+      // domyślne minimum struktur danych
+      if(model.layout==='linear' && model.rows.length===0){ model.rows=[[]]; }
+      if(model.layout==='square'){
+        // w square sensownie jest mieć przynajmniej 1 warstwę („pierścień” wokół środka)
+        if(model.rows.length===0) model.rows=[[]];
+      }
+      render(); saveState();
+    };
+
+    // Obracanie / flip
     function applyRotationToTarget(value){
       const sel = getSelected();
-      if(sel){
-        sel.item.rotation = value;
-      }else{
-        model.currentRotation = value;
-      }
-      render();
-      saveState();
+      if(sel){ sel.item.rotation = value; } else { model.currentRotation = value; }
+      render(); saveState();
     }
     function nudgeRotation(delta){
       const sel = getSelected();
@@ -387,48 +502,23 @@
         symRotation.value = model.currentRotation;
         rotationValue.value = model.currentRotation;
       }
-      render();
-      saveState();
+      render(); saveState();
     }
-    function clampAngle(a){
-      // utrzymuj w zakresie -180..180
-      a = ((a + 180) % 360 + 360) % 360 - 180;
-      return Math.round(a);
-    }
+    function clampAngle(a){ a = ((a + 180) % 360 + 360) % 360 - 180; return Math.round(a); }
 
-    symRotation.oninput = () => {
-      const v = Number(symRotation.value);
-      rotationValue.value = v;
-      applyRotationToTarget(v);
-    };
-    rotationValue.onchange = () => {
-      let v = Number(rotationValue.value)||0;
-      v = clampAngle(v);
-      symRotation.value = v;
-      applyRotationToTarget(v);
-    };
-    btnResetRotation.onclick = () => {
-      symRotation.value = 0;
-      rotationValue.value = 0;
-      applyRotationToTarget(0);
-    };
+    symRotation.oninput = () => { const v = Number(symRotation.value); rotationValue.value = v; applyRotationToTarget(v); };
+    rotationValue.onchange = () => { let v = Number(rotationValue.value)||0; v = clampAngle(v); symRotation.value = v; applyRotationToTarget(v); };
+    btnResetRotation.onclick = () => { symRotation.value = 0; rotationValue.value = 0; applyRotationToTarget(0); };
     btnRotMinus.onclick = ()=> nudgeRotation(-15);
     btnRotPlus.onclick  = ()=> nudgeRotation(15);
-
-    // Lustrzane odbicie – przełącza flipX na zaznaczonym lub domyślne dla nowych
     btnFlip.onclick = () => {
       const sel = getSelected();
-      if(sel){
-        sel.item.flipX = !sel.item.flipX;
-      }else{
-        model.currentFlipX = !model.currentFlipX;
-        btnFlip.classList.toggle('active', model.currentFlipX);
-      }
-      render();
-      saveState();
+      if(sel){ sel.item.flipX = !sel.item.flipX; }
+      else{ model.currentFlipX = !model.currentFlipX; btnFlip.classList.toggle('active', model.currentFlipX); }
+      render(); saveState();
     };
 
-    // Klawisze skrótów: [ / ] = ±15°, F = flip, Delete = usuń
+    // Skróty
     window.addEventListener('keydown', (e)=>{
       if(e.key==='['){ e.preventDefault(); nudgeRotation(-15); }
       if(e.key===']'){ e.preventDefault(); nudgeRotation(15); }
@@ -443,24 +533,20 @@
     }
 
     function applyState(state) {
-      if (!state || !state.rows) { return; }
+      if (!state || (!state.rows && !Array.isArray(state.rows))) { return; }
 
       // kompatybilność wsteczna: stare zapisy trzymały stringi
-      if (state.rows.length > 0 && state.rows[0].length > 0 && typeof state.rows[0][0] === 'string') {
-        state.rows = state.rows.map(row =>
-          row.map(sym => ({ sym: sym, rotation: 0, flipX: false }))
-        );
-      } else {
-        // upewnij się, że każde pole ma flipX
-        state.rows = state.rows.map(row =>
-          row.map(obj => ({ sym: obj.sym, rotation: obj.rotation||0, flipX: !!obj.flipX }))
-        );
+      if (state.rows?.length > 0 && state.rows[0]?.length > 0 && typeof state.rows[0][0] === 'string') {
+        state.rows = state.rows.map(row => row.map(sym => ({ sym: sym, rotation: 0, flipX: false })));
+      } else if (state.rows){
+        state.rows = state.rows.map(row => row.map(obj => ({ sym: obj.sym, rotation: obj.rotation||0, flipX: !!obj.flipX })));
       }
 
       Object.assign(model, state);
 
+      model.layout = state.layout || 'linear';
       model.numbering = state.numbering || { enabled: true, placement: 'both', size: 16, color: '#6b7280' };
-      model.selectedRow = state.selectedRow || (model.rows.length > 0 ? model.rows.length - 1 : 0);
+      model.selectedRow = state.selectedRow ?? (model.rows.length > 0 ? model.rows.length - 1 : 0);
       model.currentRotation = state.currentRotation || 0;
       model.currentFlipX = !!state.currentFlipX;
       model.selected = null;
@@ -472,6 +558,7 @@
       ratioInput.value = model.maxRatio;
       symRotation.value = model.currentRotation;
       rotationValue.value = model.currentRotation;
+      layoutMode.value = model.layout;
 
       numEnabled.checked = model.numbering.enabled;
       numPlacement.value = model.numbering.placement;
@@ -490,6 +577,7 @@
         } catch (e) {
           console.error("Błąd parsowania zapisanego stanu:", e);
           localStorage.removeItem('crochetPatternAutosave');
+          applyState(model);
         }
       } else {
         applyState(model);
@@ -534,34 +622,99 @@
     async function exportPDF(){
       const { jsPDF } = window.jspdf;
       const orient = document.getElementById('pdf-orient').value;
-      const exportRoot = document.createElement('div');
-      exportRoot.className = 'export-root';
-      model.rows.forEach((row, rowIndex)=>{
-        const er = document.createElement('div');
-        er.className='export-row';
-        er.style.gap = model.gap + 'px';
-        er.dataset.align = model.align;
-        er.style.justifyContent = model.align==='left'?'flex-start':model.align==='right'?'flex-end':'center';
-        er.style.minHeight = model.size + 'px';
 
-        if (model.numbering.enabled && (model.numbering.placement === 'left' || model.numbering.placement === 'both')) {
-          er.appendChild(createNumberSpan(rowIndex));
-        }
+      // przygotuj węzeł do zrzutu, zależnie od trybu
+      let exportRoot;
 
-        row.forEach(symObject=>{
-          const img=document.createElement('img');
-          img.src = symbolRegistry.get(symObject.sym) || '';
-          img.style.width = 'auto';
-          img.style.maxWidth = (model.size * model.maxRatio) + 'px';
-          img.style.transform = `scaleX(${symObject.flipX ? -1 : 1}) rotate(${symObject.rotation}deg)`;
-          er.appendChild(img);
+      if(model.layout === 'linear'){
+        exportRoot = document.createElement('div');
+        exportRoot.className = 'export-root';
+        model.rows.forEach((row, rowIndex)=>{
+          const er = document.createElement('div');
+          er.className='export-row';
+          er.style.gap = model.gap + 'px';
+          er.dataset.align = model.align;
+          er.style.justifyContent = model.align==='left'?'flex-start':model.align==='right'?'flex-end':'center';
+          er.style.minHeight = model.size + 'px';
+
+          if (model.numbering.enabled && (model.numbering.placement === 'left' || model.numbering.placement === 'both')) {
+            er.appendChild(createNumberSpan(rowIndex));
+          }
+
+          row.forEach(symObject=>{
+            const img=document.createElement('img');
+            img.src = symbolRegistry.get(symObject.sym) || '';
+            img.style.width = 'auto';
+            img.style.maxWidth = (model.size * model.maxRatio) + 'px';
+            img.style.transform = `scaleX(${symObject.flipX ? -1 : 1}) rotate(${symObject.rotation}deg)`;
+            er.appendChild(img);
+          });
+          
+          if (model.numbering.enabled && (model.numbering.placement === 'right' || model.numbering.placement === 'both')) {
+            er.appendChild(createNumberSpan(rowIndex));
+          }
+          exportRoot.appendChild(er);
         });
-        
-        if (model.numbering.enabled && (model.numbering.placement === 'right' || model.numbering.placement === 'both')) {
-          er.appendChild(createNumberSpan(rowIndex));
+      } else {
+        // tryb kwadratowy – budujemy mini scenę jak w render()
+        exportRoot = document.createElement('div');
+        const layers = model.rows.length;
+        const radius = Math.max(1, layers);
+        const gridSize = radius*2 + 1;
+        const cell = Math.max(10, model.size + model.gap);
+        exportRoot.style.background='#ffffff';
+        const stage = document.createElement('div');
+        stage.style.display='grid';
+        stage.style.gridTemplateColumns = `repeat(${gridSize}, ${cell}px)`;
+        stage.style.gridTemplateRows   = `repeat(${gridSize}, ${cell}px)`;
+        exportRoot.appendChild(stage);
+
+        // komórki
+        const cellRefs=[];
+        for(let y=0;y<gridSize;y++){
+          const row=[];
+          for(let x=0;x<gridSize;x++){
+            const c=document.createElement('div');
+            c.style.width=cell+'px'; c.style.height=cell+'px';
+            c.style.display='flex'; c.style.alignItems='center'; c.style.justifyContent='center';
+            stage.appendChild(c); row.push(c);
+          }
+          cellRefs.push(row);
         }
-        exportRoot.appendChild(er);
-      });
+        const cx = radius, cy = radius;
+        const ring = document.createElement('div');
+        ring.style.width = Math.floor(cell*0.7)+'px';
+        ring.style.height= Math.floor(cell*0.7)+'px';
+        ring.style.borderRadius='999px';
+        ring.style.border='2px solid #11182755';
+        ring.style.boxShadow='inset 0 0 0 2px #11182722';
+        ring.style.background='#ffffff';
+        cellRefs[cy][cx].appendChild(ring);
+
+        function coordOnPerimeter(layer, idx){
+          const r = layer; const S = r*2+1; const P = S*4-4; const k = idx%P;
+          let x = cx - r, y = cy - r;
+          if (k < S-1){ x += 1 + k; }
+          else if (k < (S-1)+(S-1)){ x = cx + r; y += 1 + (k - (S-1)); }
+          else if (k < (S-1)*3){ y = cy + r; x = cx + r - 1 - (k - (S-1)*2); }
+          else { x = cx - r; y = cy + r - 1 - (k - (S-1)*3); }
+          return {x,y};
+        }
+
+        model.rows.forEach((layerArr, layerIndex)=>{
+          const layer = layerIndex+1;
+          layerArr.forEach((symObject, idx)=>{
+            const {x,y} = coordOnPerimeter(layer, idx);
+            const img=document.createElement('img');
+            img.src = symbolRegistry.get(symObject.sym) || '';
+            img.style.maxWidth = Math.floor(cell*0.9) + 'px';
+            img.style.maxHeight= Math.floor(cell*0.9) + 'px';
+            img.style.transform = `scaleX(${symObject.flipX ? -1 : 1}) rotate(${symObject.rotation}deg)`;
+            cellRefs[y][x].appendChild(img);
+          });
+        });
+      }
+
       document.body.appendChild(exportRoot);
       const scale = 2.5;
       const shot = await html2canvas(exportRoot, { backgroundColor:'#ffffff', scale });
